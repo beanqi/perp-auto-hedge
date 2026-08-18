@@ -5,7 +5,9 @@ mod exchange;
 mod execution;
 mod logging;
 mod market;
+mod pair;
 mod risk;
+mod state;
 mod storage;
 mod strategy;
 
