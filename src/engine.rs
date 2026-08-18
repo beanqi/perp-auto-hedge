@@ -1,10 +1,16 @@
 use std::sync::mpsc::Receiver;
 
+use crate::exchange::AccountEvent;
+use crate::execution::ExecutionEvent;
 use crate::logging;
+use crate::market::MarketEvent;
 
 #[derive(Debug)]
 pub enum EngineEvent {
     Started,
+    Market(MarketEvent),
+    Account(AccountEvent),
+    Execution(ExecutionEvent),
     Shutdown,
 }
 
@@ -23,6 +29,9 @@ impl Engine {
         while let Ok(event) = self.events.recv() {
             match event {
                 EngineEvent::Started => logging::info("engine received started event"),
+                EngineEvent::Market(_) => logging::info("engine received market event"),
+                EngineEvent::Account(_) => logging::info("engine received account event"),
+                EngineEvent::Execution(_) => logging::info("engine received execution event"),
                 EngineEvent::Shutdown => {
                     logging::info("engine shutting down");
                     break;
