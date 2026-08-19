@@ -1,4 +1,4 @@
-use crate::exchange::MarketId;
+use crate::exchange::{Funding, MarketId};
 use crate::logging;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -19,6 +19,7 @@ pub struct OrderBook {
 #[derive(Debug, Clone, PartialEq)]
 pub enum MarketEvent {
     OrderBook(OrderBook),
+    Funding(Funding),
 }
 
 pub fn init() {

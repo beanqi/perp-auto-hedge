@@ -1,10 +1,19 @@
+pub mod binance;
+pub mod gate;
+
+use std::error::Error;
 use crate::logging;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MarketType {
-    Spot,
-    Perp,
+pub type ExchangeResult<T> = Result<T, Box<dyn Error + Send + Sync>>;
+
+#[derive(Debug, Clone)]
+pub struct ApiCredentials {
+    pub api_key: String,
+    pub secret_key: String,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MarketType { Spot, Perp }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MarketId {
@@ -25,10 +34,36 @@ pub struct Instrument {
     pub contract_multiplier: f64,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Funding {
+    pub market_id: MarketId,
+    pub rate: f64,
+    pub mark_price: Option<f64>,
+    pub next_funding_time_ms: Option<u64>,
+    pub timestamp_ms: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Side {
-    Buy,
-    Sell,
+pub enum Side { Buy, Sell }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeInForce { Gtc, Ioc, Fok }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlaceOrderRequest {
+    pub market_id: MarketId,
+    pub client_order_id: String,
+    pub side: Side,
+    pub price: Option<f64>,
+    pub quantity: f64,
+    pub time_in_force: TimeInForce,
+    pub reduce_only: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CancelOrderRequest {
+    pub market_id: MarketId,
+    pub order_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,13 +86,7 @@ pub struct Position {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OrderStatus {
-    New,
-    PartiallyFilled,
-    Filled,
-    Canceled,
-    Rejected,
-}
+pub enum OrderStatus { New, PartiallyFilled, Filled, Canceled, Rejected }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Order {
@@ -86,6 +115,13 @@ pub struct Fill {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct AccountSnapshot {
+    pub balances: Vec<Balance>,
+    pub positions: Vec<Position>,
+    pub open_orders: Vec<Order>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum AccountEvent {
     Balance(Balance),
     Position(Position),
@@ -93,6 +129,4 @@ pub enum AccountEvent {
     Fill(Fill),
 }
 
-pub fn init() {
-    logging::info("exchange module initialized");
-}
+pub fn init() { logging::info("exchange module initialized"); }
