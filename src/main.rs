@@ -1,6 +1,7 @@
 mod api;
 mod config;
 mod engine;
+mod event;
 mod exchange;
 mod execution;
 mod logging;
@@ -17,9 +18,10 @@ use std::sync::mpsc;
 use std::thread;
 
 use config::Config;
-use engine::{Engine, EngineEvent};
+use engine::Engine;
+use event::SystemEvent;
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     let config = Config::load();
     logging::init(&config.log_level);
     logging::info("starting perp-auto-hedge");
@@ -35,13 +37,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     let (event_tx, event_rx) = mpsc::channel();
     let engine_thread = thread::spawn(move || Engine::new(event_rx).run());
 
-    event_tx.send(EngineEvent::Started)?;
+    event_tx.send(SystemEvent::Started)?;
+    exchange::start(&config, event_tx.clone())?;
     logging::info("perp-auto-hedge is running; press Enter to stop");
 
     let mut input = String::new();
     io::stdin().read_line(&mut input)?;
 
-    event_tx.send(EngineEvent::Shutdown)?;
+    event_tx.send(SystemEvent::Shutdown)?;
     engine_thread
         .join()
         .map_err(|_| io::Error::other("engine thread panicked"))?;

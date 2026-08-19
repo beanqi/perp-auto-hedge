@@ -13,9 +13,10 @@ use tungstenite::stream::MaybeTlsStream;
 
 use super::super::{
     AccountEvent, AccountSnapshot, ApiCredentials, Balance, CancelOrderRequest, ExchangeResult, Fill,
-    Funding, Instrument, MarketId, MarketType, Order, OrderStatus, PlaceOrderRequest, Position, Side,
+    Funding, Instrument, MARKET_SYMBOLS_PER_CONNECTION, MarketId, MarketType, Order, OrderStatus, PlaceOrderRequest, Position, Side,
     TimeInForce,
 };
+use crate::event::SystemEvent;
 use crate::logging;
 use crate::market::{MarketEvent, OrderBook, PriceLevel};
 
@@ -75,25 +76,35 @@ impl BinancePerp {
         Ok(AccountSnapshot { balances: self.fetch_balances()?, positions: self.fetch_positions()?, open_orders: self.fetch_open_orders()? })
     }
 
-    pub fn run_book_stream(&self, symbols: &[String], tx: Sender<MarketEvent>) {
+    pub fn start_market_streams(&self, symbols: &[String], tx: Sender<SystemEvent>) -> ExchangeResult<()> {
+        for (index, chunk) in symbols.chunks(MARKET_SYMBOLS_PER_CONNECTION).enumerate() {
+            let exchange = self.clone(); let symbols = chunk.to_vec(); let tx = tx.clone();
+            thread::Builder::new().name(format!("binance-book-{index}")).spawn(move || exchange.run_book_stream(&symbols, tx))?;
+        }
+        let exchange = self.clone(); let symbols = symbols.to_vec();
+        thread::Builder::new().name("binance-funding".into()).spawn(move || exchange.run_funding_stream(&symbols, tx))?;
+        Ok(())
+    }
+
+    pub fn run_book_stream(&self, symbols: &[String], tx: Sender<SystemEvent>) {
         if symbols.is_empty() { return; }
         let streams = symbols.iter().map(|s| format!("{}@bookTicker", s.to_lowercase())).collect::<Vec<_>>().join("/");
         run_stream(&format!("{PUBLIC_WS}{streams}"), move |v| {
-            if let Some(event) = parse_book(data(v)) { tx.send(event).map_err(|_| err("market receiver closed"))?; }
+            if let Some(event) = parse_book(data(v)) { tx.send(SystemEvent::Market(event)).map_err(|_| err("market receiver closed"))?; }
             Ok(())
         });
     }
 
-    pub fn run_funding_stream(&self, symbols: &[String], tx: Sender<MarketEvent>) {
+    pub fn run_funding_stream(&self, symbols: &[String], tx: Sender<SystemEvent>) {
         if symbols.is_empty() { return; }
         let streams = symbols.iter().map(|s| format!("{}@markPrice@1s", s.to_lowercase())).collect::<Vec<_>>().join("/");
         run_stream(&format!("{MARKET_WS}{streams}"), move |v| {
-            if let Some(event) = parse_funding(data(v)) { tx.send(event).map_err(|_| err("market receiver closed"))?; }
+            if let Some(event) = parse_funding(data(v)) { tx.send(SystemEvent::Market(event)).map_err(|_| err("market receiver closed"))?; }
             Ok(())
         });
     }
 
-    pub fn run_private_stream(&self, tx: Sender<AccountEvent>) {
+    pub fn run_private_stream(&self, tx: Sender<SystemEvent>) {
         loop {
             if let Err(e) = self.private_connection(&tx) { logging::info(&format!("binance private websocket reconnecting: {e}")); }
             thread::sleep(RECONNECT);
@@ -106,7 +117,7 @@ impl BinancePerp {
         Ok(BinanceTradingWs { socket, credentials, next_id: now_ms() })
     }
 
-    fn private_connection(&self, tx: &Sender<AccountEvent>) -> ExchangeResult<()> {
+    fn private_connection(&self, tx: &Sender<SystemEvent>) -> ExchangeResult<()> {
         let key = self.start_listen_key()?;
         let url = format!("{PRIVATE_WS}?listenKey={key}&events=ORDER_TRADE_UPDATE/ACCOUNT_UPDATE");
         let (mut socket, _) = connect(url.as_str())?;
@@ -115,8 +126,8 @@ impl BinancePerp {
                 Message::Text(raw) => {
                     let value: Value = serde_json::from_str(raw.as_ref())?;
                     match text(data(&value), "e") {
-                        Some("ORDER_TRADE_UPDATE") => for event in parse_order_update(data(&value)) { tx.send(event).map_err(|_| err("account receiver closed"))?; },
-                        Some("ACCOUNT_UPDATE") => for event in parse_account_update(data(&value)) { tx.send(event).map_err(|_| err("account receiver closed"))?; },
+                        Some("ORDER_TRADE_UPDATE") => for event in parse_order_update(data(&value)) { tx.send(SystemEvent::Account(event)).map_err(|_| err("account receiver closed"))?; },
+                        Some("ACCOUNT_UPDATE") => for event in parse_account_update(data(&value)) { tx.send(SystemEvent::Account(event)).map_err(|_| err("account receiver closed"))?; },
                         _ => {}
                     }
                 }
